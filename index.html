@@ -1179,8 +1179,49 @@
     // 2. AUTHENTICATION & ROLE-SPECIFIC DASHBOARD ROUTING
     // ==========================================================
 
+    // Keep active auth in memory only so going back, reloading, or reopening always asks to re-login
+    let currentUser = null;
+
+    function resetLoginForms() {
+      const fieldIds = [
+        'loginPatientName',
+        'loginPatientPhone',
+        'loginPatientCity',
+        'loginVolunteerSelect',
+        'loginVolunteerName',
+        'loginVolunteerPin'
+      ];
+      fieldIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+    }
+
+    function clearUrlDashboardHash() {
+      try {
+        const cleanUrl = window.location.href.split('#')[0];
+        history.replaceState({ loggedIn: false }, '', cleanUrl);
+      } catch (e) {
+        if (window.location.hash) {
+          window.location.hash = '';
+        }
+      }
+    }
+
+    function forceRelogin(message = "Please login again to continue.") {
+      const wasLoggedIn = Boolean(currentUser);
+      currentUser = null;
+      localStorage.removeItem('health_logged_user');
+      resetLoginForms();
+      clearUrlDashboardHash();
+      checkAuthState();
+      if (wasLoggedIn && message) {
+        showToast(message, "🔒");
+      }
+    }
+
     function checkAuthState() {
-      const loggedUser = JSON.parse(localStorage.getItem('health_logged_user'));
+      const loggedUser = currentUser;
       const loginSection = document.getElementById('loginSection');
       const dashboardSection = document.getElementById('dashboardSection');
       const pWrapper = document.getElementById('patientDashboardWrapper');
@@ -1190,7 +1231,7 @@
       const headerTitle = document.getElementById('headerTitle');
       const headerSubtitle = document.getElementById('headerSubtitle');
 
-      // If no valid user (or old admin), show login screen
+      // If no valid user, show login screen
       if (!loggedUser || (loggedUser.role !== 'patient' && loggedUser.role !== 'volunteer')) {
         loginSection.style.display = 'flex';
         dashboardSection.style.display = 'none';
@@ -1274,6 +1315,17 @@
       }
     }
 
+    function completeLogin(userSession, toastMessage, toastIcon = "🚀") {
+      currentUser = userSession;
+      try {
+        history.pushState({ loggedIn: true, role: userSession.role }, '', '#dashboard');
+      } catch (e) {
+        window.location.hash = 'dashboard';
+      }
+      showToast(toastMessage, toastIcon);
+      checkAuthState();
+    }
+
     function handlePatientLogin(event) {
       event.preventDefault();
       const name = document.getElementById('loginPatientName').value.trim();
@@ -1288,9 +1340,7 @@
         loginTime: new Date().toLocaleTimeString()
       };
 
-      localStorage.setItem('health_logged_user', JSON.stringify(userSession));
-      showToast(`Welcome, ${name}! Opening Patient Portal...`, "🩺");
-      checkAuthState();
+      completeLogin(userSession, `Welcome, ${name}! Opening Patient Portal...`, "🩺");
     }
 
     function handleVolunteerLogin(event) {
@@ -1307,9 +1357,7 @@
         loginTime: new Date().toLocaleTimeString()
       };
 
-      localStorage.setItem('health_logged_user', JSON.stringify(userSession));
-      showToast(`Welcome, ${name}! Opening Volunteer Dashboard...`, "🤝");
-      checkAuthState();
+      completeLogin(userSession, `Welcome, ${name}! Opening Volunteer Dashboard...`, "🤝");
     }
 
     function quickLogin(role, name, phone = "9876543210") {
@@ -1320,13 +1368,14 @@
         loginTime: new Date().toLocaleTimeString()
       };
 
-      localStorage.setItem('health_logged_user', JSON.stringify(userSession));
-      showToast(`Logged in as ${name}!`, "🚀");
-      checkAuthState();
+      completeLogin(userSession, `Logged in as ${name}!`, "🚀");
     }
 
     function logoutUser() {
+      currentUser = null;
       localStorage.removeItem('health_logged_user');
+      resetLoginForms();
+      clearUrlDashboardHash();
       showToast("Logged out successfully.", "🚪");
       checkAuthState();
     }
@@ -1811,10 +1860,44 @@
     }
 
     // ==========================================================
-    // 10. INITIALIZATION ON PAGE LOAD
+    // 10. INITIALIZATION & BACK-BUTTON RE-LOGIN HANDLING
     // ==========================================================
+    window.addEventListener('popstate', function() {
+      if (currentUser) {
+        forceRelogin("Session ended on going back. Please login again.");
+      } else if (window.location.hash === '#dashboard') {
+        clearUrlDashboardHash();
+        checkAuthState();
+        showToast("Please login again to access the dashboard.", "🔒");
+      }
+    });
+
+    window.addEventListener('hashchange', function() {
+      if (currentUser && window.location.hash !== '#dashboard') {
+        forceRelogin("Session ended on going back. Please login again.");
+      } else if (!currentUser && window.location.hash === '#dashboard') {
+        clearUrlDashboardHash();
+        checkAuthState();
+        showToast("Please login again to access the dashboard.", "🔒");
+      }
+    });
+
+    window.addEventListener('pageshow', function(event) {
+      if (event.persisted) {
+        if (currentUser) {
+          forceRelogin("Welcome back! Please login again.");
+        } else {
+          clearUrlDashboardHash();
+          checkAuthState();
+        }
+      }
+    });
+
     window.onload = function() {
-      // First check auth state: if not logged in, Login Interface opens first!
+      // Clear any saved login session so opening/reloading/going back always asks to login again
+      localStorage.removeItem('health_logged_user');
+      currentUser = null;
+      clearUrlDashboardHash();
       checkAuthState();
     };
   </script>
